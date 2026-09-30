@@ -9,6 +9,9 @@ const REPORT_NAME = 'Product Mix';
 const TARGET_ESTABLISHMENT = 'Leander';
 const CENTRAL_TIME_ZONE = 'America/Chicago';
 
+const REPORT_START_TIME = { time: '12:00', meridiem: 'AM' };
+const REPORT_END_TIME = { time: '11:59', meridiem: 'PM' };
+
 const PANELS = {
     filters: {
         name: 'Filters',
@@ -69,17 +72,6 @@ function validateDate(value, fieldName) {
     }
 }
 
-function validateTime(value, fieldName) {
-    const timePattern = /^(0?[1-9]|1[0-2]):[0-5]\d$/;
-
-    if (!timePattern.test(value)) {
-        throw new Error(
-            `${fieldName} must use HH:MM 12-hour format. `
-            + `Received: ${value}`,
-        );
-    }
-}
-
 /**
  * Calendar date for a moment in US Central Time.
  */
@@ -112,9 +104,9 @@ function formatDateParts({ year, month, day }) {
 }
 
 /**
- * Report start date: yesterday in US Central Time, MM/DD/YYYY.
+ * Default report date: yesterday in US Central Time, MM/DD/YYYY.
  */
-function calculateStartDate(today = new Date()) {
+function calculateReportDate(today = new Date()) {
     const { year, month, day } = getCentralDateParts(today);
     const calendarDate = new Date(Date.UTC(year, month - 1, day));
 
@@ -128,10 +120,12 @@ function calculateStartDate(today = new Date()) {
 }
 
 /**
- * Report end date: today in US Central Time, MM/DD/YYYY.
+ * Zero-pad a validated M/D/YYYY date; the picker parses dates strictly.
  */
-function calculateEndDate(today = new Date()) {
-    return formatDateParts(getCentralDateParts(today));
+function normalizeDate(value) {
+    const [month, day, year] = value.split('/').map(Number);
+
+    return formatDateParts({ year, month, day });
 }
 
 /**
@@ -1084,55 +1078,29 @@ try {
         password,
         establishment = TARGET_ESTABLISHMENT,
         override_flag = false,
-        override_startDate,
-        override_endDate,
-        startTime,
-        startMeridiem,
-        endTime,
-        endMeridiem,
+        override_date,
     } = input ?? {};
 
-    let startDate;
-    let endDate;
-
-    if (override_flag) {
-        if (!override_startDate || !override_endDate) {
-            throw new Error(
-                'override_startDate and override_endDate are required '
-                + 'when override_flag is true.',
-            );
-        }
-
-        startDate = override_startDate;
-        endDate = override_endDate;
-    } else {
-        const today = new Date();
-
-        startDate = calculateStartDate(today);
-        endDate = calculateEndDate(today);
+    if (override_flag && !override_date) {
+        throw new Error(
+            'override_date is required when override_flag is true.',
+        );
     }
+
+    const requestedDate = override_flag
+        ? override_date.trim()
+        : calculateReportDate();
 
     log.info('Actor input loaded.', {
         hasUsername: Boolean(username),
         hasPassword: Boolean(password),
         establishment,
         override_flag,
-        startDate,
-        startTime,
-        startMeridiem,
-        endDate,
-        endTime,
-        endMeridiem,
+        reportDate: requestedDate,
     });
 
     if (!username || !password) {
         throw new Error('Both username and password are required.');
-    }
-
-    if (!startTime || !startMeridiem || !endTime || !endMeridiem) {
-        throw new Error(
-            'Start and end times and AM/PM values are required.',
-        );
     }
 
     if (establishment !== TARGET_ESTABLISHMENT) {
@@ -1142,27 +1110,17 @@ try {
         );
     }
 
-    validateDate(startDate, 'startDate');
-    validateDate(endDate, 'endDate');
-    validateTime(startTime, 'startTime');
-    validateTime(endTime, 'endTime');
+    validateDate(requestedDate, 'Report date');
 
-    const normalizedStartMeridiem = startMeridiem.trim().toUpperCase();
-    const normalizedEndMeridiem = endMeridiem.trim().toUpperCase();
-
-    if (normalizedStartMeridiem !== 'AM' || normalizedEndMeridiem !== 'AM') {
-        throw new Error(
-            'The current Actor version supports AM report times only.',
-        );
-    }
+    const reportDate = normalizeDate(requestedDate);
 
     const range = {
-        startDate,
-        startTime,
-        startMeridiem: normalizedStartMeridiem,
-        endDate,
-        endTime,
-        endMeridiem: normalizedEndMeridiem,
+        startDate: reportDate,
+        startTime: REPORT_START_TIME.time,
+        startMeridiem: REPORT_START_TIME.meridiem,
+        endDate: reportDate,
+        endTime: REPORT_END_TIME.time,
+        endMeridiem: REPORT_END_TIME.meridiem,
     };
 
     let extractionError;
@@ -1205,17 +1163,15 @@ try {
                 );
             }
 
-            const businessDate = toIsoDate(startDate);
+            const businessDate = toIsoDate(reportDate);
             const extractedAt = new Date().toISOString();
 
             const metadata = {
                 report: REPORT_NAME,
                 establishment: selectedEstablishment,
                 business_date: businessDate,
-                start_date: startDate,
-                start_time: `${startTime} ${normalizedStartMeridiem}`,
-                end_date: endDate,
-                end_time: `${endTime} ${normalizedEndMeridiem}`,
+                start_time: `${range.startTime} ${range.startMeridiem}`,
+                end_time: `${range.endTime} ${range.endMeridiem}`,
                 source_filename: filename,
                 extracted_at: extractedAt,
             };
