@@ -205,6 +205,42 @@ async function describeInput(input) {
     });
 }
 
+/**
+ * Revel greys out controls it manages (e.g. Class/Category once a sort
+ * order is chosen) with CSS classes rather than the disabled attribute.
+ */
+async function isLocked(input) {
+    return input.evaluate((element) => {
+        if (
+            element.disabled
+            || element.getAttribute('aria-disabled') === 'true'
+        ) {
+            return true;
+        }
+
+        const listItem = element.closest('li');
+        const stopAt = (listItem ?? element.parentElement)?.parentElement;
+
+        for (
+            let node = element;
+            node && node !== stopAt;
+            node = node.parentElement
+        ) {
+            if (node.classList.contains('disabled')) return true;
+        }
+
+        if (listItem?.querySelector('.disabled, [disabled]')) return true;
+
+        const label = element.closest('label');
+
+        if (!label) return false;
+
+        const style = window.getComputedStyle(label);
+
+        return style.pointerEvents === 'none' || Number(style.opacity) < 1;
+    });
+}
+
 async function isInteractive(input) {
     const target = await getToggleTarget(input);
 
@@ -904,17 +940,27 @@ async function applyPreferences(page) {
 
         if (
             requiredIds.has(id)
-            || await checkbox.isDisabled()
+            || await isLocked(checkbox)
             || !(await isInteractive(checkbox))
         ) {
             continue;
         }
 
-        await setInputChecked(
-            checkbox,
-            false,
-            `Preference: ${await describeInput(checkbox)}`,
-        );
+        const description = `Preference: ${await describeInput(checkbox)}`;
+
+        try {
+            await setInputChecked(checkbox, false, description);
+        } catch (error) {
+            /*
+             * Revel re-checks some fields that the chosen sort order
+             * requires (e.g. Category under Sort by Category).
+             */
+            if (!(await checkbox.isChecked())) throw error;
+
+            log.warning(
+                `Revel keeps "${description}" checked; leaving it as is.`,
+            );
+        }
     }
 
     for (const { id, label } of [
