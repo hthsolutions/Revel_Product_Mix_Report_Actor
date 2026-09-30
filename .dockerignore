@@ -1,0 +1,33 @@
+# Editor configurations
+.idea
+.vscode
+.zed
+
+# Crawlee and Apify local storage
+apify_storage
+crawlee_storage
+storage
+
+# Installed dependencies
+node_modules
+
+# Git
+.git
+.gitignore
+
+# Local environment variables and credentials
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Local screenshots and downloads
+*.png
+downloads
+tmp
+temp

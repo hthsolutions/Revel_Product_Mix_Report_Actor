@@ -1,0 +1,11 @@
+{
+    "type": "module",
+    "dependencies": {
+        "apify": "^3.4.0",
+        "crawlee": "^3.15.0",
+        "playwright": "*"
+    },
+    "scripts": {
+        "start": "node src/main.js"
+    }
+}

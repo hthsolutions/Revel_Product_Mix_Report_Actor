@@ -1,0 +1,106 @@
+{
+    "$schema": "https://apify.com/schemas/v1/input.ide.json",
+    "title": "Layne's Revel Product Mix",
+    "description": "Credentials and report settings for the Layne's Revel Product Mix report.",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "url": {
+            "title": "Revel Product Mix URL",
+            "type": "string",
+            "editor": "textfield",
+            "description": "URL of the Revel Product Mix report.",
+            "default": "https://laynes.revelup.com/reports/product_mix/"
+        },
+        "username": {
+            "title": "Revel username",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Username used to sign into Revel.",
+            "isSecret": true
+        },
+        "password": {
+            "title": "Revel password",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Password used to sign into Revel.",
+            "isSecret": true
+        },
+        "establishment": {
+            "title": "Revel establishment",
+            "type": "string",
+            "editor": "select",
+            "description": "Establishment to select after login. The current Actor version supports Leander only.",
+            "default": "Leander",
+            "enum": [
+                "Lampasas",
+                "Leander",
+                "Marble Falls"
+            ],
+            "enumTitles": [
+                "41 | Lampasas",
+                "42 | Leander",
+                "29 | Marble Falls"
+            ]
+        },
+        "override_flag": {
+            "title": "Override dates",
+            "type": "boolean",
+            "editor": "checkbox",
+            "description": "When enabled, the Actor uses override_startDate and override_endDate. When disabled, startDate is yesterday in US Central Time and endDate is today in US Central Time.",
+            "default": false
+        },
+        "override_startDate": {
+            "title": "Override start date",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Report start date in MM/DD/YYYY format. Used only when override_flag is true."
+        },
+        "override_endDate": {
+            "title": "Override end date",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Report end date in MM/DD/YYYY format. Used only when override_flag is true."
+        },
+        "startTime": {
+            "title": "Start time",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Report start time in HH:MM 12-hour format.",
+            "default": "06:00"
+        },
+        "startMeridiem": {
+            "title": "Start AM/PM",
+            "type": "string",
+            "editor": "hidden",
+            "description": "The current Actor uses AM for the report start time.",
+            "default": "AM"
+        },
+        "endTime": {
+            "title": "End time",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Report end time in HH:MM 12-hour format.",
+            "default": "06:00"
+        },
+        "endMeridiem": {
+            "title": "End AM/PM",
+            "type": "string",
+            "editor": "hidden",
+            "description": "The current Actor uses AM for the report end time.",
+            "default": "AM"
+        }
+    },
+    "required": [
+        "url",
+        "username",
+        "password",
+        "establishment",
+        "override_flag",
+        "startTime",
+        "startMeridiem",
+        "endTime",
+        "endMeridiem"
+    ],
+    "additionalProperties": false
+}

@@ -1,0 +1,26 @@
+{
+    "$schema": "https://apify.com/schemas/v1/output.ide.json",
+    "actorOutputSchemaVersion": 1,
+    "title": "Layne's Revel Product Mix Output",
+    "description": "Product Mix rows exported from Revel.",
+    "properties": {
+        "results": {
+            "type": "string",
+            "title": "Product Mix Rows",
+            "description": "Dataset with one JSON item per Product Mix report row.",
+            "template": "{{links.apiDefaultDatasetUrl}}/items"
+        },
+        "reportJson": {
+            "type": "string",
+            "title": "Product Mix JSON",
+            "description": "The full Revel JSON export with run metadata.",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/PRODUCT_MIX_JSON"
+        },
+        "screenshots": {
+            "type": "string",
+            "title": "Debug Screenshots",
+            "description": "Key-value store containing screenshots, the raw JSON export, and the run summary.",
+            "template": "{{links.apiDefaultKeyValueStoreUrl}}/keys"
+        }
+    }
+}
