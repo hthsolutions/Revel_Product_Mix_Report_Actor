@@ -7,7 +7,7 @@
         "results": {
             "type": "string",
             "title": "Product Mix Rows",
-            "description": "Dataset with one JSON item per Product Mix report row.",
+            "description": "The productcombos rows (Parent_Product rows removed) that were upserted into Supabase.",
             "template": "{{links.apiDefaultDatasetUrl}}/items"
         },
         "reportJson": {

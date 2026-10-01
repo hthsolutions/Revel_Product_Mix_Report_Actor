@@ -1,9 +1,61 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import { Actor, log } from 'apify';
 import { PlaywrightCrawler } from 'crawlee';
+import { createClient } from '@supabase/supabase-js';
 
 await Actor.init();
+
+const supabaseUrl =
+    process.env.SUPABASE_URL
+    || 'https://ongqhvokcwceqgnetonq.supabase.co';
+
+const supabaseServiceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseServiceRoleKey) {
+    throw new Error(
+        'SUPABASE_SERVICE_ROLE_KEY is not configured.',
+    );
+}
+
+const supabase = createClient(
+    supabaseUrl,
+    supabaseServiceRoleKey,
+    {
+        auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+        },
+    },
+);
+
+const SUPABASE_BATCH_SIZE = 500;
+
+const PRODUCT_COMBO_FIELDS = [
+    'product_category',
+    'tax',
+    'n_comps',
+    'total',
+    'n_items',
+    'n_voids',
+    'product_name',
+    'product_class',
+    'price',
+    'product_subcategory',
+    'discount',
+    'order_discount',
+];
+
+const PRIMARY_KEY_FIELDS = [
+    'business_date',
+    'location',
+    'product_class',
+    'product_category',
+    'product_subcategory',
+    'product_name',
+];
 
 const REPORT_NAME = 'Product Mix';
 const TARGET_ESTABLISHMENT = 'Leander';
@@ -1083,31 +1135,142 @@ function isPlainObject(value) {
 }
 
 /**
- * Locate the report rows inside the exported JSON: the largest array
- * of objects anywhere in the document, with its path for traceability.
+ * Breadth-first search so the shallowest occurrence of the key wins.
  */
-function findReportRows(document, path = '$') {
-    let best = { path, rows: [] };
+function findKeyValue(document, key) {
+    const queue = [{ value: document, path: '$' }];
 
-    if (Array.isArray(document)) {
-        if (document.length > 0 && document.every(isPlainObject)) {
-            best = { path, rows: document };
-        }
+    while (queue.length > 0) {
+        const { value, path } = queue.shift();
 
-        document.forEach((item, index) => {
-            const candidate = findReportRows(item, `${path}[${index}]`);
+        if (isPlainObject(value)) {
+            if (Object.hasOwn(value, key)) {
+                return { path: `${path}.${key}`, value: value[key] };
+            }
 
-            if (candidate.rows.length > best.rows.length) best = candidate;
-        });
-    } else if (isPlainObject(document)) {
-        for (const [key, value] of Object.entries(document)) {
-            const candidate = findReportRows(value, `${path}.${key}`);
-
-            if (candidate.rows.length > best.rows.length) best = candidate;
+            for (const [childKey, child] of Object.entries(value)) {
+                queue.push({ value: child, path: `${path}.${childKey}` });
+            }
+        } else if (Array.isArray(value)) {
+            value.forEach((child, index) => {
+                queue.push({ value: child, path: `${path}[${index}]` });
+            });
         }
     }
 
-    return best;
+    return null;
+}
+
+function toRowList(value, path) {
+    if (Array.isArray(value)) return value.filter(isPlainObject);
+
+    if (isPlainObject(value) && Object.values(value).every(isPlainObject)) {
+        return Object.values(value);
+    }
+
+    throw new Error(
+        `Expected ${path} to be a list of rows, but found `
+        + `${Array.isArray(value) ? 'an array' : typeof value}.`,
+    );
+}
+
+function compositeKey(record) {
+    const keyText = PRIMARY_KEY_FIELDS
+        .map((field) => String(record[field] ?? ''))
+        .join('|');
+
+    return createHash('sha256').update(keyText).digest('hex');
+}
+
+/**
+ * The "productcombos" rows, minus Parent_Product rows, reduced to
+ * PRODUCT_COMBO_FIELDS and keyed by a hash of PRIMARY_KEY_FIELDS.
+ */
+function buildProductComboRows(reportJson, { businessDate, location }) {
+    const match = findKeyValue(reportJson, 'productcombos');
+
+    if (!match) {
+        throw new Error(
+            '"productcombos" was not found in the Product Mix JSON '
+            + 'export. See PRODUCT_MIX_RAW in the key-value store.',
+        );
+    }
+
+    const sourceRows = toRowList(match.value, match.path);
+
+    const missingFields = PRODUCT_COMBO_FIELDS.filter(
+        (field) => !sourceRows.some((row) => Object.hasOwn(row, field)),
+    );
+
+    if (sourceRows.length > 0 && missingFields.length > 0) {
+        log.warning(
+            `These fields never appear in ${match.path}: `
+            + `${missingFields.join(', ')}`,
+        );
+    }
+
+    const rows = sourceRows
+        .filter((row) => row.row_type !== 'Parent_Product')
+        .map((row) => {
+            const record = {
+                business_date: businessDate,
+                location,
+                ...Object.fromEntries(
+                    PRODUCT_COMBO_FIELDS.map(
+                        (field) => [field, row[field] ?? null],
+                    ),
+                ),
+            };
+
+            return { id: compositeKey(record), ...record };
+        });
+
+    /*
+     * Postgres rejects an upsert batch that touches the same key twice,
+     * and silently merging rows would misstate quantities.
+     */
+    const seen = new Map();
+    const duplicates = [];
+
+    for (const row of rows) {
+        if (seen.has(row.id)) {
+            duplicates.push(
+                PRIMARY_KEY_FIELDS.map((field) => row[field]).join(' | '),
+            );
+        }
+
+        seen.set(row.id, row);
+    }
+
+    if (duplicates.length > 0) {
+        throw new Error(
+            `${duplicates.length} productcombos rows share a primary key `
+            + `with another row, e.g. ${duplicates.slice(0, 5).join('; ')}`,
+        );
+    }
+
+    return {
+        path: match.path,
+        sourceRowCount: sourceRows.length,
+        rows,
+    };
+}
+
+async function upsertToSupabase(table, rows) {
+    for (let start = 0; start < rows.length; start += SUPABASE_BATCH_SIZE) {
+        const batch = rows.slice(start, start + SUPABASE_BATCH_SIZE);
+
+        const { error } = await supabase
+            .from(table)
+            .upsert(batch, { onConflict: 'id' });
+
+        if (error) {
+            throw new Error(
+                `Unable to write Product Mix rows to Supabase table `
+                + `"${table}": ${error.message}`,
+            );
+        }
+    }
 }
 
 let exitCode = 0;
@@ -1125,6 +1288,7 @@ try {
         establishment = TARGET_ESTABLISHMENT,
         override_flag = false,
         override_date,
+        supabaseTable = 'daily-product-mix',
     } = input ?? {};
 
     if (override_flag && !override_date) {
@@ -1222,42 +1386,49 @@ try {
                 extracted_at: extractedAt,
             };
 
-            const { path: rowsPath, rows } = findReportRows(reportJson);
-
-            if (rows.length === 0) {
-                throw new Error(
-                    'The Product Mix JSON export did not contain any rows. '
-                    + 'See PRODUCT_MIX_RAW in the key-value store.',
-                );
-            }
-
-            log.info(`Found ${rows.length} report rows at ${rowsPath}.`);
-
-            const datasetItems = rows.map((row, index) => ({
-                id: `${businessDate}_${selectedEstablishment}_${index + 1}`,
-                ...metadata,
-                row_number: index + 1,
-                ...row,
-            }));
-
             await Actor.setValue('PRODUCT_MIX_JSON', {
                 ...metadata,
                 report_data: reportJson,
             });
 
-            await Actor.pushData(datasetItems);
+            const {
+                path: rowsPath,
+                sourceRowCount,
+                rows,
+            } = buildProductComboRows(reportJson, {
+                businessDate,
+                location: selectedEstablishment,
+            });
+
+            log.info(
+                `Found ${sourceRowCount} rows at ${rowsPath}; `
+                + `${rows.length} remain after removing Parent_Product rows.`,
+            );
+
+            if (rows.length === 0) {
+                throw new Error(
+                    'No productcombos rows remain after removing '
+                    + 'Parent_Product rows.',
+                );
+            }
+
+            await Actor.pushData(rows);
+
+            await upsertToSupabase(supabaseTable, rows);
+
+            log.info(
+                `Upserted ${rows.length} rows into Supabase table `
+                + `"${supabaseTable}".`,
+            );
 
             await Actor.setValue('OUTPUT', {
                 status: 'success',
                 ...metadata,
                 rows_path: rowsPath,
-                total_rows: datasetItems.length,
+                source_rows: sourceRowCount,
+                saved_rows: rows.length,
+                supabase_table: supabaseTable,
             });
-
-            log.info(
-                `Saved ${datasetItems.length} Product Mix rows to the `
-                + 'dataset.',
-            );
         },
 
         async failedRequestHandler({ page }, error) {

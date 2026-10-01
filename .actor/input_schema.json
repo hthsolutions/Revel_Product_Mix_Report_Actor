@@ -55,6 +55,13 @@
             "type": "string",
             "editor": "textfield",
             "description": "Report date in MM/DD/YYYY format, used as both the start and end date. Used only when override_flag is true."
+        },
+        "supabaseTable": {
+            "title": "Supabase table",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Supabase table that receives the Product Mix rows. Rows are upserted on the id column.",
+            "default": "daily-product-mix"
         }
     },
     "required": [
