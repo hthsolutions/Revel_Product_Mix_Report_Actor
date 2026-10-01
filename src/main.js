@@ -761,27 +761,47 @@ async function setDateRange(page, range) {
     await saveScreenshot(page, 'REVEL_DATE_RANGE_APPLIED');
 }
 
+/**
+ * A click that lands while another panel is still closing can leave
+ * the toggle marked active with its form hidden; the next click resets
+ * it, so keep clicking until the form shows.
+ */
 async function openPanel(page, panel) {
     const form = page.locator(panel.form);
+    const toggle = page.locator(panel.toggle).first();
+    const maxAttempts = 4;
 
-    if (await form.isVisible()) return form;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        if (await form.isVisible()) return form;
 
-    log.info(`Opening the ${panel.name} panel.`);
+        log.info(
+            `Opening the ${panel.name} panel `
+            + `(attempt ${attempt} of ${maxAttempts}).`,
+        );
 
-    await page.locator(panel.toggle).first().click();
+        await toggle.click();
 
-    await form.waitFor({
-        state: 'visible',
-        timeout: 20_000,
-    });
+        if (await pollUntil(() => form.isVisible(), 5_000)) return form;
+    }
 
-    return form;
+    throw new Error(
+        `The ${panel.name} panel did not open after ${maxAttempts} clicks.`,
+    );
 }
 
 async function closePanel(page, panel) {
     const form = page.locator(panel.form);
 
-    if (!(await form.isVisible())) return;
+    /*
+     * Apply/Save may close the panel on their own with an animation;
+     * clicking the toggle mid-animation would reopen it.
+     */
+    const closedOnItsOwn = await pollUntil(
+        async () => !(await form.isVisible()),
+        3_000,
+    );
+
+    if (closedOnItsOwn) return;
 
     await page.locator(panel.toggle).first().click();
 
