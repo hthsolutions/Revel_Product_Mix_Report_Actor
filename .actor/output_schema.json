@@ -7,7 +7,7 @@
         "results": {
             "type": "string",
             "title": "Product Mix Rows",
-            "description": "The productcombos rows (Parent_Product rows removed) that were upserted into Supabase.",
+            "description": "The productcombos and productmix rows that were upserted into Supabase; the source field says which key each row came from.",
             "template": "{{links.apiDefaultDatasetUrl}}/items"
         },
         "reportJson": {

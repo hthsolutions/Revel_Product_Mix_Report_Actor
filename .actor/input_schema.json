@@ -57,11 +57,18 @@
             "description": "Report date in MM/DD/YYYY format, used as both the start and end date. Used only when override_flag is true."
         },
         "supabaseTable": {
-            "title": "Supabase table",
+            "title": "Supabase table for productcombos",
             "type": "string",
             "editor": "textfield",
-            "description": "Supabase table that receives the Product Mix rows. Rows are upserted on the id column.",
-            "default": "daily-product-mix"
+            "description": "Supabase table that receives the productcombos rows. Rows are upserted on the id column.",
+            "default": "daily-product-mix-combomix"
+        },
+        "productMixTable": {
+            "title": "Supabase table for productmix",
+            "type": "string",
+            "editor": "textfield",
+            "description": "Supabase table that receives the productmix rows. Rows are upserted on the id column.",
+            "default": "daily-product-mix-productmix"
         }
     },
     "required": [

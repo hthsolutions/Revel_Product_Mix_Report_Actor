@@ -33,29 +33,69 @@ const supabase = createClient(
 
 const SUPABASE_BATCH_SIZE = 500;
 
-const PRODUCT_COMBO_FIELDS = [
-    'product_category',
-    'tax',
-    'n_comps',
-    'total',
-    'n_items',
-    'n_voids',
-    'product_name',
-    'product_class',
-    'price',
-    'product_subcategory',
-    'discount',
-    'order_discount',
-];
+/*
+ * Each entry turns one key of the Revel JSON export into rows for one
+ * Supabase table. `id` is a SHA-256 of primaryKeyFields joined by "|".
+ */
+const PRODUCT_COMBOS_EXTRACT = {
+    key: 'productcombos',
+    fields: [
+        'product_category',
+        'tax',
+        'n_comps',
+        'total',
+        'n_items',
+        'n_voids',
+        'product_name',
+        'product_class',
+        'price',
+        'product_subcategory',
+        'discount',
+        'order_discount',
+    ],
+    primaryKeyFields: [
+        'business_date',
+        'location',
+        'product_class',
+        'product_category',
+        'product_subcategory',
+        'product_name',
+    ],
+    keepRow: (row) => row.row_type === 'Parent_Product',
+    filterDescription: 'keeping only Parent_Product rows',
+};
 
-const PRIMARY_KEY_FIELDS = [
-    'business_date',
-    'location',
-    'product_class',
-    'product_category',
-    'product_subcategory',
-    'product_name',
-];
+const PRODUCT_MIX_EXTRACT = {
+    key: 'productmix',
+    fields: [
+        'product_category',
+        'n_comps',
+        'gm',
+        'total',
+        'n_items',
+        'n_voids',
+        'product_name',
+        'row_type',
+        'product_class',
+        'price',
+        'product_subcategory',
+        'discount',
+        'order_discount',
+    ],
+    primaryKeyFields: [
+        'business_date',
+        'location',
+        'row_type',
+        'product_class',
+        'product_category',
+        'product_subcategory',
+        'product_name',
+    ],
+    keepRow: (row) => (
+        row.product_category !== null && row.product_category !== undefined
+    ),
+    filterDescription: 'keeping rows where product_category is not null',
+};
 
 const REPORT_NAME = 'Product Mix';
 const TARGET_ESTABLISHMENT = 'Leander';
@@ -1194,8 +1234,8 @@ function toRowList(value, path) {
     );
 }
 
-function compositeKey(record) {
-    const keyText = PRIMARY_KEY_FIELDS
+function compositeKey(record, primaryKeyFields) {
+    const keyText = primaryKeyFields
         .map((field) => String(record[field] ?? ''))
         .join('|');
 
@@ -1203,22 +1243,23 @@ function compositeKey(record) {
 }
 
 /**
- * The "productcombos" rows, filtered for Parent_Product rows, reduced to
- * PRODUCT_COMBO_FIELDS and keyed by a hash of PRIMARY_KEY_FIELDS.
+ * The rows under extract.key, filtered by extract.keepRow, reduced to
+ * extract.fields and keyed by a hash of extract.primaryKeyFields.
  */
-function buildProductComboRows(reportJson, { businessDate, location }) {
-    const match = findKeyValue(reportJson, 'productcombos');
+function buildExtractRows(reportJson, extract, { businessDate, location }) {
+    const { key, fields, primaryKeyFields, keepRow } = extract;
+    const match = findKeyValue(reportJson, key);
 
     if (!match) {
         throw new Error(
-            '"productcombos" was not found in the Product Mix JSON '
+            `"${key}" was not found in the Product Mix JSON `
             + 'export. See PRODUCT_MIX_RAW in the key-value store.',
         );
     }
 
     const sourceRows = toRowList(match.value, match.path);
 
-    const missingFields = PRODUCT_COMBO_FIELDS.filter(
+    const missingFields = fields.filter(
         (field) => !sourceRows.some((row) => Object.hasOwn(row, field)),
     );
 
@@ -1230,19 +1271,17 @@ function buildProductComboRows(reportJson, { businessDate, location }) {
     }
 
     const rows = sourceRows
-        .filter((row) => row.row_type == 'Parent_Product')
+        .filter(keepRow)
         .map((row) => {
             const record = {
                 business_date: businessDate,
                 location,
                 ...Object.fromEntries(
-                    PRODUCT_COMBO_FIELDS.map(
-                        (field) => [field, row[field] ?? null],
-                    ),
+                    fields.map((field) => [field, row[field] ?? null]),
                 ),
             };
 
-            return { id: compositeKey(record), ...record };
+            return { id: compositeKey(record, primaryKeyFields), ...record };
         });
 
     /*
@@ -1255,7 +1294,7 @@ function buildProductComboRows(reportJson, { businessDate, location }) {
     for (const row of rows) {
         if (seen.has(row.id)) {
             duplicates.push(
-                PRIMARY_KEY_FIELDS.map((field) => row[field]).join(' | '),
+                primaryKeyFields.map((field) => row[field]).join(' | '),
             );
         }
 
@@ -1264,7 +1303,7 @@ function buildProductComboRows(reportJson, { businessDate, location }) {
 
     if (duplicates.length > 0) {
         throw new Error(
-            `${duplicates.length} productcombos rows share a primary key `
+            `${duplicates.length} ${key} rows share a primary key `
             + `with another row, e.g. ${duplicates.slice(0, 5).join('; ')}`,
         );
     }
@@ -1308,8 +1347,14 @@ try {
         establishment = TARGET_ESTABLISHMENT,
         override_flag = false,
         override_date,
-        supabaseTable = 'daily-product-mix',
+        supabaseTable = 'daily-product-mix-combomix',
+        productMixTable = 'daily-product-mix-productmix',
     } = input ?? {};
+
+    const extracts = [
+        { ...PRODUCT_COMBOS_EXTRACT, table: supabaseTable },
+        { ...PRODUCT_MIX_EXTRACT, table: productMixTable },
+    ];
 
     if (override_flag && !override_date) {
         throw new Error(
@@ -1411,43 +1456,64 @@ try {
                 report_data: reportJson,
             });
 
-            const {
-                path: rowsPath,
-                sourceRowCount,
-                rows,
-            } = buildProductComboRows(reportJson, {
-                businessDate,
-                location: selectedEstablishment,
+            /*
+             * Build every extract before writing any, so a problem with
+             * one key does not leave the other table half-updated.
+             */
+            const results = extracts.map((extract) => {
+                const result = buildExtractRows(reportJson, extract, {
+                    businessDate,
+                    location: selectedEstablishment,
+                });
+
+                log.info(
+                    `${extract.key}: found ${result.sourceRowCount} rows at `
+                    + `${result.path}; ${result.rows.length} remain after `
+                    + `${extract.filterDescription}.`,
+                );
+
+                if (result.rows.length === 0) {
+                    throw new Error(
+                        `No ${extract.key} rows remain after `
+                        + `${extract.filterDescription}.`,
+                    );
+                }
+
+                return { extract, ...result };
             });
 
-            log.info(
-                `Found ${sourceRowCount} rows at ${rowsPath}; `
-                + `${rows.length} remain after keeping only Parent_Product rows.`,
-            );
+            for (const { extract, rows } of results) {
+                await Actor.setValue(
+                    `${extract.key.toUpperCase()}_ROWS`,
+                    rows,
+                );
 
-            if (rows.length === 0) {
-                throw new Error(
-                    'No productcombos rows remain after keeping only '
-                    + 'Parent_Product rows.',
+                await Actor.pushData(
+                    rows.map((row) => ({ source: extract.key, ...row })),
+                );
+
+                await upsertToSupabase(extract.table, rows);
+
+                log.info(
+                    `${extract.key}: upserted ${rows.length} rows into `
+                    + `Supabase table "${extract.table}".`,
                 );
             }
-
-            await Actor.pushData(rows);
-
-            await upsertToSupabase(supabaseTable, rows);
-
-            log.info(
-                `Upserted ${rows.length} rows into Supabase table `
-                + `"${supabaseTable}".`,
-            );
 
             await Actor.setValue('OUTPUT', {
                 status: 'success',
                 ...metadata,
-                rows_path: rowsPath,
-                source_rows: sourceRowCount,
-                saved_rows: rows.length,
-                supabase_table: supabaseTable,
+                extracts: Object.fromEntries(
+                    results.map(({ extract, path, sourceRowCount, rows }) => [
+                        extract.key,
+                        {
+                            rows_path: path,
+                            source_rows: sourceRowCount,
+                            saved_rows: rows.length,
+                            supabase_table: extract.table,
+                        },
+                    ]),
+                ),
             });
         },
 
