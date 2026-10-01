@@ -92,7 +92,7 @@ const PRODUCT_MIX_EXTRACT = {
         'product_name',
     ],
     keepRow: (row) => (
-        row.product_category !== null && row.product_category !== undefined
+        row.product_category !== null && row.product_category !== undefined && row.product_category !== ''
     ),
     filterDescription: 'keeping rows where product_category is not null',
 };
