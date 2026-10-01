@@ -1183,7 +1183,7 @@ function compositeKey(record) {
 }
 
 /**
- * The "productcombos" rows, minus Parent_Product rows, reduced to
+ * The "productcombos" rows, filtered for Parent_Product rows, reduced to
  * PRODUCT_COMBO_FIELDS and keyed by a hash of PRIMARY_KEY_FIELDS.
  */
 function buildProductComboRows(reportJson, { businessDate, location }) {
@@ -1210,7 +1210,7 @@ function buildProductComboRows(reportJson, { businessDate, location }) {
     }
 
     const rows = sourceRows
-        .filter((row) => row.row_type !== 'Parent_Product')
+        .filter((row) => row.row_type == 'Parent_Product')
         .map((row) => {
             const record = {
                 business_date: businessDate,
@@ -1402,12 +1402,12 @@ try {
 
             log.info(
                 `Found ${sourceRowCount} rows at ${rowsPath}; `
-                + `${rows.length} remain after removing Parent_Product rows.`,
+                + `${rows.length} remain after keeping only Parent_Product rows.`,
             );
 
             if (rows.length === 0) {
                 throw new Error(
-                    'No productcombos rows remain after removing '
+                    'No productcombos rows remain after keeping only '
                     + 'Parent_Product rows.',
                 );
             }
