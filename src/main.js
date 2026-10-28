@@ -98,8 +98,19 @@ const PRODUCT_MIX_EXTRACT = {
 };
 
 const REPORT_NAME = 'Product Mix';
-const TARGET_ESTABLISHMENT = 'Leander';
 const CENTRAL_TIME_ZONE = 'America/Chicago';
+
+/*
+ * Input values are the header names. Tree labels are what Revel shows
+ * in the establishment picker.
+ */
+const ESTABLISHMENTS = {
+    Lampasas: '41 | Lampasas',
+    Leander: '42 | Leander',
+    'Marble Falls': '29 | Marble Falls',
+};
+
+const DEFAULT_ESTABLISHMENT = 'Leander';
 
 const REPORT_START_TIME = { time: '12:00', meridiem: 'AM' };
 const REPORT_END_TIME = { time: '11:59', meridiem: 'PM' };
@@ -507,7 +518,14 @@ async function login(page, { url, username, password }) {
     }
 }
 
-async function selectEstablishment(page) {
+function establishmentHeaderPattern(name) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    return new RegExp(`^\\s*${escaped}\\s*$`);
+}
+
+async function selectEstablishment(page, establishment) {
+    const treeLabel = ESTABLISHMENTS[establishment];
     const establishmentText = page.locator(
         '[data-cy="header-establishment-text"]',
     );
@@ -526,18 +544,18 @@ async function selectEstablishment(page) {
         + `${currentEstablishment}`,
     );
 
-    if (currentEstablishment !== TARGET_ESTABLISHMENT) {
+    if (currentEstablishment !== establishment) {
         await establishmentText.click();
 
         log.info('Clicked the establishment name.');
 
-        const leanderOption = page
+        const establishmentOption = page
             .locator('span.fancytree-title')
             .filter({
-                hasText: '42 | Leander',
+                hasText: treeLabel,
             });
 
-        await leanderOption.waitFor({
+        await establishmentOption.waitFor({
             state: 'visible',
             timeout: 30_000,
         });
@@ -546,15 +564,15 @@ async function selectEstablishment(page) {
 
         await saveScreenshot(page, 'REVEL_ESTABLISHMENT_LIST');
 
-        log.info(`Selecting establishment: ${TARGET_ESTABLISHMENT}`);
+        log.info(`Selecting establishment: ${treeLabel}`);
 
-        await leanderOption.click();
+        await establishmentOption.click();
     }
 
     const selectedHeader = page
         .locator('[data-cy="header-establishment-text"]')
         .filter({
-            hasText: /^\s*Leander\s*$/,
+            hasText: establishmentHeaderPattern(establishment),
         });
 
     await selectedHeader.waitFor({
@@ -565,9 +583,9 @@ async function selectEstablishment(page) {
     const selectedEstablishment =
         (await selectedHeader.textContent())?.trim();
 
-    if (selectedEstablishment !== TARGET_ESTABLISHMENT) {
+    if (selectedEstablishment !== establishment) {
         throw new Error(
-            `Expected establishment "${TARGET_ESTABLISHMENT}", `
+            `Expected establishment "${establishment}", `
             + `but found "${selectedEstablishment}".`,
         );
     }
@@ -1344,7 +1362,7 @@ try {
         url = 'https://laynes.revelup.com/reports/product_mix/',
         username,
         password,
-        establishment = TARGET_ESTABLISHMENT,
+        establishment = DEFAULT_ESTABLISHMENT,
         override_flag = false,
         override_date,
         supabaseTable = 'daily-product-mix-combomix',
@@ -1378,10 +1396,10 @@ try {
         throw new Error('Both username and password are required.');
     }
 
-    if (establishment !== TARGET_ESTABLISHMENT) {
+    if (!ESTABLISHMENTS[establishment]) {
         throw new Error(
-            `The current Actor version only supports Leander. `
-            + `Received: ${establishment}`,
+            `Unsupported establishment "${establishment}". `
+            + `Supported: ${Object.keys(ESTABLISHMENTS).join(', ')}.`,
         );
     }
 
@@ -1408,14 +1426,17 @@ try {
         async requestHandler({ page }) {
             await login(page, { url, username, password });
 
-            const selectedEstablishment = await selectEstablishment(page);
+            const selectedEstablishment = await selectEstablishment(
+                page,
+                establishment,
+            );
 
             await page.locator(PANELS.filters.toggle).first().waitFor({
                 state: 'visible',
                 timeout: 30_000,
             });
 
-            await saveScreenshot(page, 'REVEL_LEANDER_PRODUCT_MIX');
+            await saveScreenshot(page, 'REVEL_PRODUCT_MIX');
 
             await setDateRange(page, range);
             await applyFilters(page);
