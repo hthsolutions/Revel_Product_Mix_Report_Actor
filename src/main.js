@@ -108,6 +108,7 @@ const ESTABLISHMENTS = {
     Lampasas: '41 | Lampasas',
     Leander: '42 | Leander',
     'Marble Falls': '29 | Marble Falls',
+    Temple: '62 | Temple',
 };
 
 const DEFAULT_ESTABLISHMENT = 'Leander';
